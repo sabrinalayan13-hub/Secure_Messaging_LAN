@@ -1,9 +1,15 @@
+import ipaddress
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from jose import jwt, JWTError
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from database import engine, SessionLocal
 from model import Base, User
@@ -13,19 +19,62 @@ import websocket as ws
 app = FastAPI()
 Base.metadata.create_all(bind=engine)
 
-# For local dev with Vite
+# =========================
+# Minecraft-LAN style gate
+# =========================
+def is_lan_ip(ip_str: str) -> bool:
+    """
+    Allow only LAN (RFC1918 private ranges) or loopback.
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.1 (loopback)
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
+
+
+class LANOnlyHTTPMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host
+        if not is_lan_ip(client_ip):
+            return JSONResponse({"detail": "LAN only"}, status_code=403)
+        return await call_next(request)
+
+
+app.add_middleware(LANOnlyHTTPMiddleware)
+
+# =========================
+# CORS
+# =========================
+# For dev:
+# - localhost/127.0.0.1 work on the server machine
+# - [LOCALHOSTIP] placeholder for the server LAN IP when testing from other devices
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[LOCALHOSTIP]:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# =========================
+# Health
+# =========================
 @app.get("/health")
 def health():
     return {"ok": True}
 
+# =========================
+# Auth routes
+# =========================
 @app.post("/register")
 def register(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -43,6 +92,7 @@ def register(
     db.commit()
     return {"msg": "User registered successfully"}
 
+
 @app.post("/login")
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -55,11 +105,14 @@ def login(
     token = auth.create_access_token(subject=user.username)
     return {"access_token": token, "token_type": "bearer"}
 
+# =========================
+# WebSocket (token-secured)
+# =========================
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    Secure websocket:
-      Connect with: ws://127.0.0.1:8000/ws?token=<JWT>
+    Secure websocket (LAN only):
+      Connect with: ws://[LOCALHOSTIP]:8000/ws?token=<JWT>
       Username is derived from token 'sub' (no impersonation).
 
     Message formats:
@@ -67,6 +120,13 @@ async def websocket_endpoint(websocket: WebSocket):
       - DM:        "recipient:message"
       - Command:   "/users" -> list online users
     """
+
+    # LAN-only gate for WebSockets
+    client_ip = websocket.client.host
+    if not is_lan_ip(client_ip):
+        await websocket.close(code=1008)  # Policy Violation
+        return
+
     token = websocket.query_params.get("token")
     if not token:
         await websocket.close(code=1008)
@@ -145,7 +205,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     await ws.manager.notify_user_not_found(username, recipient)
 
             else:
-                # Broadcast (robust broadcast is implemented in websocket.py)
                 await ws.manager.broadcast(f"{username}: {data}")
 
     except WebSocketDisconnect:
