@@ -13,7 +13,7 @@ import websocket as ws
 app = FastAPI()
 Base.metadata.create_all(bind=engine)
 
-# NOTE: For dev this is fine. For hardened use, set allow_origins to your frontend URL(s).
+# For local dev with Vite
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -22,11 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/health")
 def health():
     return {"ok": True}
-
 
 @app.post("/register")
 def register(
@@ -36,12 +34,14 @@ def register(
     if db.query(User).filter(User.username == form_data.username).first():
         raise HTTPException(status_code=400, detail="Username already registered")
 
+    # Enforce password policy
+    auth.validate_password_or_raise(form_data.password)
+
     hashed = auth.hash_password(form_data.password)
     new_user = User(username=form_data.username, hashed_password=hashed)
     db.add(new_user)
     db.commit()
     return {"msg": "User registered successfully"}
-
 
 @app.post("/login")
 def login(
@@ -54,7 +54,6 @@ def login(
 
     token = auth.create_access_token(subject=user.username)
     return {"access_token": token, "token_type": "bearer"}
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -70,7 +69,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     token = websocket.query_params.get("token")
     if not token:
-        await websocket.close(code=1008)  # Policy Violation
+        await websocket.close(code=1008)
         return
 
     # Validate token and extract username
@@ -91,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    # Ensure user still exists in DB (prevents tokens for deleted users)
+    # Ensure user still exists in DB
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
@@ -101,7 +100,7 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         db.close()
 
-    # Connect (manager.accept() + join broadcast handled there)
+    # Connect (accept + join broadcast handled by manager)
     await ws.manager.connect(username, websocket)
 
     # Confirm to connecting user
@@ -138,7 +137,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     continue
 
-                # Deliver message; notify sender if recipient offline
                 delivered = await ws.manager.send_personal_message(
                     f"{username}: {message}",
                     recipient,
@@ -147,21 +145,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     await ws.manager.notify_user_not_found(username, recipient)
 
             else:
-                # Broadcast
+                # Broadcast (robust broadcast is implemented in websocket.py)
                 await ws.manager.broadcast(f"{username}: {data}")
 
     except WebSocketDisconnect:
-        # Remove user and notify channel (broadcast is robust to dead sockets)
         ws.manager.disconnect(username)
         await ws.manager.broadcast(f"[SYSTEM] {username} left the channel.")
     except Exception:
-        # Ensure cleanup on unexpected errors
         ws.manager.disconnect(username)
         try:
             await ws.manager.broadcast(f"[SYSTEM] {username} disconnected unexpectedly.")
         except Exception:
             pass
         try:
-            await websocket.close(code=1011)  # Internal Error
+            await websocket.close(code=1011)
         except Exception:
             pass
