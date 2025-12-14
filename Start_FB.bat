@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$env:JWT_SECRET = '%JWT_SECRET%'; " ^
   "$wd = (Resolve-Path '.\%BACKEND_DIR%').Path; " ^
   "$py = (Resolve-Path '.\%BACKEND_DIR%\venv\Scripts\python.exe').Path; " ^
-  "$p = Start-Process -PassThru -WorkingDirectory $wd -FilePath $py -ArgumentList @('-m','uvicorn','main:app','--reload','--host','127.0.0.1','--port','8000'); " ^
+  "$p = Start-Process -PassThru -WorkingDirectory $wd -FilePath $py -ArgumentList @('-m','uvicorn','main:app','--reload','--host','0.0.0.0','--port','8000'); " ^
   "Set-Content -NoNewline -Path '.\.run\backend.pid' -Value $p.Id"
 
 timeout /t 2 /nobreak >nul
