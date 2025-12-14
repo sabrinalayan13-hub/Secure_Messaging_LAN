@@ -228,9 +228,16 @@ Messaging:
   </div>
 
   <script>
-    // Match your backend
-    const API = "http://127.0.0.1:8000";
-    const WS  = "ws://127.0.0.1:8000/ws";
+	// Minecraft-LAN style: use the same host the frontend was loaded from
+	const SERVER_HOST = window.location.hostname;
+
+	// Use the page protocol to decide http vs https, ws vs wss
+	const API_PROTO = window.location.protocol === "https:" ? "https" : "http";
+	const WS_PROTO  = window.location.protocol === "https:" ? "wss"  : "ws";
+
+	const API = `${API_PROTO}://${SERVER_HOST}:8000`;
+	const WS  = `${WS_PROTO}://${SERVER_HOST}:8000/ws`;
+
 
     // Allowed specials must match backend list
     const ALLOWED_SPECIALS = `!@#$%^&*()_+-=[]{}|;:'",.<>?/`;
