@@ -1,15 +1,9 @@
-import ipaddress
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from jose import jwt, JWTError
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from database import engine, SessionLocal
 from model import Base, User
@@ -19,67 +13,50 @@ import websocket as ws
 app = FastAPI()
 Base.metadata.create_all(bind=engine)
 
-# =========================
-# Minecraft-LAN style gate
-# =========================
-def is_lan_ip(ip_str: str) -> bool:
-    """
-    Allow only LAN (RFC1918 private ranges) or loopback.
-    - 10.0.0.0/8
-    - 172.16.0.0/12
-    - 192.168.0.0/16
-    - 127.0.0.1 (loopback)
-    """
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return False
-    return ip.is_private or ip.is_loopback
+# =========================================================
+# CORS — LAN dev (explicit origins; safe with credentials)
+# =========================================================
+# IMPORTANT:
+# - Add your server LAN IP below (the one shown by Vite "Network:")
+# - You can add additional LAN IPs later if your IP changes
+LAN_IP = "192.168.0.158"  # <-- update if your server IP changes
 
-
-class LANOnlyHTTPMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host
-        if not is_lan_ip(client_ip):
-            return JSONResponse({"detail": "LAN only"}, status_code=403)
-        return await call_next(request)
-
-
-app.add_middleware(LANOnlyHTTPMiddleware)
-
-# =========================
-# CORS
-# =========================
-# For dev:
-# - localhost/127.0.0.1 work on the server machine
-# - [LOCALHOSTIP] placeholder for the server LAN IP when testing from other devices
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://[LOCALHOSTIP]:5173",
+        f"http://{LAN_IP}:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# =========================
-# Health
-# =========================
 @app.get("/health")
 def health():
     return {"ok": True}
 
-# =========================
-# Auth routes
-# =========================
+# =========================================================
+# Auth routes (with diagnostics)
+# =========================================================
 @app.post("/register")
 def register(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(auth.get_db),
+    request: Request = None,
 ):
+    # Diagnostics (prints to backend console)
+    try:
+        print(
+            "[REGISTER]",
+            "client=", request.client.host if request else None,
+            "origin=", request.headers.get("origin") if request else None,
+            "host=", request.headers.get("host") if request else None,
+        )
+    except Exception:
+        pass
+
     if db.query(User).filter(User.username == form_data.username).first():
         raise HTTPException(status_code=400, detail="Username already registered")
 
@@ -97,7 +74,19 @@ def register(
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(auth.get_db),
+    request: Request = None,
 ):
+    # Diagnostics (prints to backend console)
+    try:
+        print(
+            "[LOGIN]",
+            "client=", request.client.host if request else None,
+            "origin=", request.headers.get("origin") if request else None,
+            "host=", request.headers.get("host") if request else None,
+        )
+    except Exception:
+        pass
+
     user = auth.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
@@ -105,15 +94,14 @@ def login(
     token = auth.create_access_token(subject=user.username)
     return {"access_token": token, "token_type": "bearer"}
 
-# =========================
-# WebSocket (token-secured)
-# =========================
+# =========================================================
+# WebSocket (token-secured) + diagnostics
+# =========================================================
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    Secure websocket (LAN only):
-      Connect with: ws://[LOCALHOSTIP]:8000/ws?token=<JWT>
-      Username is derived from token 'sub' (no impersonation).
+    Secure websocket:
+      ws://<server-ip>:8000/ws?token=<JWT>
 
     Message formats:
       - Broadcast: "hello everyone"
@@ -121,11 +109,15 @@ async def websocket_endpoint(websocket: WebSocket):
       - Command:   "/users" -> list online users
     """
 
-    # LAN-only gate for WebSockets
-    client_ip = websocket.client.host
-    if not is_lan_ip(client_ip):
-        await websocket.close(code=1008)  # Policy Violation
-        return
+    # Diagnostics: show connection attempt source
+    try:
+        print(
+            "[WS CONNECT ATTEMPT]",
+            "client=", websocket.client.host if websocket.client else None,
+            "path=", str(websocket.url),
+        )
+    except Exception:
+        pass
 
     token = websocket.query_params.get("token")
     if not token:
@@ -205,13 +197,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     await ws.manager.notify_user_not_found(username, recipient)
 
             else:
+                # Broadcast
                 await ws.manager.broadcast(f"{username}: {data}")
 
     except WebSocketDisconnect:
         ws.manager.disconnect(username)
         await ws.manager.broadcast(f"[SYSTEM] {username} left the channel.")
-    except Exception:
+    except Exception as e:
         ws.manager.disconnect(username)
+        try:
+            print("[WS ERROR]", repr(e))
+        except Exception:
+            pass
         try:
             await ws.manager.broadcast(f"[SYSTEM] {username} disconnected unexpectedly.")
         except Exception:
