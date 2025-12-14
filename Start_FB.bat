@@ -42,16 +42,22 @@ if not exist ".\%BACKEND_DIR%\venv\Scripts\python.exe" (
 )
 
 REM ==================================================
-REM Generate random JWT_SECRET (32+ chars)
+REM OPTION B: Create/Reuse a stable JWT secret
+REM Stored at: .\.run\jwt_secret.txt
 REM ==================================================
-for /f %%S in ('powershell -NoProfile -Command ^
-  "[Convert]::ToBase64String((1..32 | ForEach-Object {Get-Random -Maximum 256}))"'
-) do set "JWT_SECRET=%%S"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p = '.\.run\jwt_secret.txt'; " ^
+  "if (!(Test-Path $p)) { " ^
+  "  $s = [Convert]::ToBase64String((1..32 | ForEach-Object {Get-Random -Maximum 256})); " ^
+  "  Set-Content -NoNewline -Path $p -Value $s; " ^
+  "} "
 
-echo Generated JWT secret (prefix): %JWT_SECRET:~0,6%******
+for /f "usebackq delims=" %%S in (".\.run\jwt_secret.txt") do set "JWT_SECRET=%%S"
+
+echo Using stable JWT secret (prefix): %JWT_SECRET:~0,6%******
 
 REM ==================================================
-REM Start backend (FastAPI / Uvicorn)
+REM Start backend (JWT_SECRET inherited by child process)
 REM ==================================================
 echo Starting backend...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -64,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 timeout /t 2 /nobreak >nul
 
 REM ==================================================
-REM Start frontend (Vite / React)
+REM Start frontend
 REM ==================================================
 echo Starting frontend...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -77,6 +83,7 @@ echo.
 echo =========================================
 echo Backend Docs: http://127.0.0.1:8000/docs
 echo Frontend:    http://localhost:5173
+echo JWT secret stored at: .\.run\jwt_secret.txt
 echo =========================================
 echo.
 
