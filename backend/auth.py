@@ -28,15 +28,21 @@ JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "secure-messaging-lan-client")
 # Standard OAuth2 Bearer token dependency
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+# Use bcrypt_sha256 to avoid bcrypt's 72-byte password limit
 pwd_context = CryptContext(
-    schemes=["bcrypt"],
+    schemes=["bcrypt_sha256"],
     deprecated="auto",
-    bcrypt__rounds=12,      # adjust after measuring (12–14 typical)
-    bcrypt__ident="2b",
+    bcrypt_sha256__rounds=12,
 )
 
-# Dummy hash to mitigate user-enumeration timing differences
-_DUMMY_HASH = pwd_context.hash("not-the-password")
+# Dummy hash to mitigate user-enumeration timing differences (lazy init)
+_DUMMY_HASH: Optional[str] = None
+
+def _get_dummy_hash() -> str:
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = pwd_context.hash("not-the-password")
+    return _DUMMY_HASH
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -68,6 +74,7 @@ def verify_and_update_password(db: Session, user: User, plain_password: str) -> 
         user.hashed_password = pwd_context.hash(plain_password)
         db.add(user)
         db.commit()
+        # Optional: db.refresh(user)
     return True
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
@@ -77,7 +84,7 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
-        pwd_context.verify(password, _DUMMY_HASH)  # burn roughly equal time
+        pwd_context.verify(password, _get_dummy_hash())  # burn roughly equal time
         return None
 
     return user if verify_and_update_password(db, user, password) else None
