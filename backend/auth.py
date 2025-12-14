@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -34,6 +35,35 @@ pwd_context = CryptContext(
     deprecated="auto",
     bcrypt_sha256__rounds=12,
 )
+
+# =========================
+# Password policy
+# =========================
+ALLOWED_SPECIALS = r"""!@#$%^&*()_+-=[]{}|;:'",.<>?/"""
+
+PASSWORD_REGEX = re.compile(
+    r"""
+    ^                               # start
+    (?=.*[A-Z])                     # at least one uppercase
+    (?=.*[!@#$%^&*()_\+\-=\[\]{}|;:'",.<>?/])  # at least one allowed special
+    .{12,15}                        # length 12-15
+    $                               # end
+    """,
+    re.VERBOSE,
+)
+
+PASSWORD_RULES_TEXT = (
+    "Password must be 12–15 characters long, contain at least 1 capital letter, "
+    "and at least 1 special character.\n"
+    "Allowed special characters: ! @ # $ % ^ & * ( ) _ + - = [ ] { } | ; : ' \" , . < > ? /"
+)
+
+def validate_password_or_raise(password: str) -> None:
+    if not PASSWORD_REGEX.match(password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=PASSWORD_RULES_TEXT,
+        )
 
 # Dummy hash to mitigate user-enumeration timing differences (lazy init)
 _DUMMY_HASH: Optional[str] = None
@@ -74,7 +104,6 @@ def verify_and_update_password(db: Session, user: User, plain_password: str) -> 
         user.hashed_password = pwd_context.hash(plain_password)
         db.add(user)
         db.commit()
-        # Optional: db.refresh(user)
     return True
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
@@ -103,7 +132,7 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
         "exp": int(expire.timestamp()),
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
-        "jti": secrets.token_urlsafe(16),  # unique token id (useful if you later add revocation)
+        "jti": secrets.token_urlsafe(16),
         "typ": "access",
     }
     return jwt.encode(claims, SECRET_KEY, algorithm=ALGORITHM)
@@ -140,7 +169,6 @@ def get_current_user(
 
     user = db.query(User).filter(User.username == username).first()
     if not user:
-        # Token may be valid but user no longer exists
         raise credentials_exception
 
     return user
