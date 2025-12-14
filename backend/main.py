@@ -16,11 +16,16 @@ Base.metadata.create_all(bind=engine)
 # NOTE: For dev this is fine. For hardened use, set allow_origins to your frontend URL(s).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 @app.post("/register")
@@ -96,12 +101,12 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         db.close()
 
-    # Connect (your improved manager will accept() and broadcast join message)
+    # Connect (manager.accept() + join broadcast handled there)
     await ws.manager.connect(username, websocket)
 
-    # Optional: confirm to the connecting user
+    # Confirm to connecting user
     await ws.manager.send_personal_message(
-        "[SYSTEM] Connected. Use 'recipient:message' for DM, or '/users' to list online users.",
+        "[SYSTEM] Connected. DM: recipient:message | Broadcast: plain text | /users for online list",
         username,
     )
 
@@ -133,23 +138,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     continue
 
-                # Send message to recipient; notify sender if user not online
-                sent = await ws.manager.send_personal_message(
+                # Deliver message; notify sender if recipient offline
+                delivered = await ws.manager.send_personal_message(
                     f"{username}: {message}",
                     recipient,
                 )
-                if not sent:
+                if not delivered:
                     await ws.manager.notify_user_not_found(username, recipient)
 
             else:
-                # Broadcast if user sends plain text without "recipient:"
+                # Broadcast
                 await ws.manager.broadcast(f"{username}: {data}")
 
     except WebSocketDisconnect:
+        # Remove user and notify channel (broadcast is robust to dead sockets)
         ws.manager.disconnect(username)
-        # Optional: broadcast leave message (connect() already broadcasts join)
         await ws.manager.broadcast(f"[SYSTEM] {username} left the channel.")
     except Exception:
+        # Ensure cleanup on unexpected errors
         ws.manager.disconnect(username)
         try:
             await ws.manager.broadcast(f"[SYSTEM] {username} disconnected unexpectedly.")
