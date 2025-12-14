@@ -2,13 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>SECURE MESSAGING TERMINAL</title>
 
   <style>
-    /* ====== GLOBAL RESET ====== */
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -21,25 +19,55 @@
       align-items: center;
     }
 
-    /* ====== TERMINAL BOX ====== */
     .terminal {
-      width: 420px;
-      padding: 24px;
+      width: 620px;
+      max-width: calc(100vw - 32px);
+      padding: 20px;
       border: 2px solid #00ff66;
-      box-shadow:
-        0 0 15px #00ff66,
-        inset 0 0 10px #003300;
-      background: rgba(0, 10, 0, 0.9);
+      box-shadow: 0 0 15px #00ff66, inset 0 0 10px #003300;
+      background: rgba(0, 10, 0, 0.92);
       text-align: center;
+      position: relative;
+      overflow: hidden;
+      animation: flicker 2.2s infinite;
+    }
+
+    /* CRT scanlines */
+    .terminal::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0, 255, 102, 0.03),
+        rgba(0, 255, 102, 0.03) 1px,
+        rgba(0, 0, 0, 0.00) 3px,
+        rgba(0, 0, 0, 0.00) 5px
+      );
+      pointer-events: none;
+      mix-blend-mode: screen;
     }
 
     h1 {
       font-size: 18px;
-      margin-bottom: 20px;
+      margin: 0 0 12px;
       text-shadow: 0 0 5px #00ff66;
+      letter-spacing: 1px;
     }
 
-    /* ====== INPUTS ====== */
+    .sub {
+      font-size: 12px;
+      color: #00cc55;
+      margin-bottom: 12px;
+    }
+
+    .card {
+      border: 1px solid #00ff66;
+      padding: 14px;
+      background: rgba(0,0,0,0.6);
+      box-shadow: inset 0 0 8px #002200;
+    }
+
     input {
       width: 100%;
       padding: 10px;
@@ -50,12 +78,8 @@
       font-family: inherit;
       outline: none;
     }
+    input::placeholder { color: #009944; }
 
-    input::placeholder {
-      color: #009944;
-    }
-
-    /* ====== BUTTONS ====== */
     button {
       width: 100%;
       padding: 10px;
@@ -65,39 +89,82 @@
       color: #00ff66;
       font-family: inherit;
       cursor: pointer;
-      transition: background 0.2s, box-shadow 0.2s;
+      transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
     }
-
     button:hover {
       background: #003300;
       box-shadow: 0 0 8px #00ff66;
     }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
 
-    /* ====== TOGGLE LINKS ====== */
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .row input { flex: 1; margin: 0; }
+    .row button { width: 140px; margin: 0; }
+
     .link {
       margin-top: 10px;
       font-size: 12px;
       cursor: pointer;
       color: #00cc55;
       text-decoration: underline;
+      user-select: none;
     }
 
-    /* ====== STATUS TEXT ====== */
     .status {
-      margin-top: 12px;
+      margin-top: 10px;
       font-size: 12px;
-      min-height: 14px;
+      min-height: 16px;
+      text-align: left;
+      white-space: pre-wrap; /* important for multiline backend errors */
     }
 
-    /* ====== CRT FLICKER ====== */
+    .hint {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #00aa44;
+      text-align: left;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    #log {
+      height: 280px;
+      overflow-y: auto;
+      border: 1px solid #00ff66;
+      background: #000;
+      padding: 10px;
+      text-align: left;
+      margin-top: 12px;
+      white-space: pre-wrap;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      border: 1px solid #00ff66;
+      padding: 4px 8px;
+      background: #001900;
+    }
+
     @keyframes flicker {
-      0% { opacity: 0.9; }
+      0% { opacity: 0.94; }
       50% { opacity: 1; }
-      100% { opacity: 0.95; }
-    }
-
-    .terminal {
-      animation: flicker 2s infinite;
+      100% { opacity: 0.97; }
     }
   </style>
 </head>
@@ -105,66 +172,278 @@
 <body>
   <div class="terminal">
     <h1>SECURE MESSAGING TERMINAL</h1>
+    <div class="sub">LAN SECURE CHAT • AUTH + WEBSOCKET</div>
 
-    <form id="authForm">
-      <input id="username" placeholder="USERNAME" required />
-      <input id="password" type="password" placeholder="PASSWORD" required />
-      <button type="submit" id="submitBtn">LOGIN</button>
-    </form>
+    <!-- AUTH VIEW -->
+    <div id="authView" class="card">
+      <form id="authForm">
+        <input id="username" placeholder="USERNAME" autocomplete="username" required />
+        <input id="password" type="password" placeholder="PASSWORD" autocomplete="current-password" required />
+        <button type="submit" id="submitBtn">LOGIN</button>
+      </form>
 
-    <div class="link" id="toggleMode">CREATE ACCOUNT</div>
-    <div class="status" id="status"></div>
+      <div class="link" id="toggleMode">CREATE ACCOUNT</div>
+
+      <div class="hint" id="registerHint" style="display:none;">
+Password rules:
+- 12–15 characters
+- 1 capital letter (A–Z)
+- 1 special character from:
+  ! @ # $ % ^ & * ( ) _ + - = [ ] { } | ; : ' " , . &lt; &gt; ? /
+      </div>
+
+      <div class="status" id="status"></div>
+    </div>
+
+    <!-- CHAT VIEW -->
+    <div id="chatView" class="card" style="display:none;">
+      <div class="topbar">
+        <div class="pill" id="whoami">USER: ???</div>
+        <div class="pill" id="wsState">WS: DISCONNECTED</div>
+
+        <button id="reconnectBtn" style="width:auto; padding:6px 10px; margin:0;">
+          RECONNECT
+        </button>
+
+        <div class="link" id="logoutBtn">LOGOUT</div>
+      </div>
+
+      <div class="hint">
+Commands:
+- /users          (list online)
+Messaging:
+- broadcast: hello everyone
+- DM:        bob:hello bob
+      </div>
+
+      <div id="log"></div>
+
+      <div class="row">
+        <input id="msg" placeholder="TYPE MESSAGE... (DM format: recipient:message)" />
+        <button id="sendBtn">SEND</button>
+      </div>
+
+      <div class="status" id="chatStatus"></div>
+    </div>
   </div>
 
   <script>
-    let mode = "login"; // or "register"
+    // Match your backend
+    const API = "http://127.0.0.1:8000";
+    const WS  = "ws://127.0.0.1:8000/ws";
 
+    // Allowed specials must match backend list
+    const ALLOWED_SPECIALS = `!@#$%^&*()_+-=[]{}|;:'",.<>?/`;
+    const specialRegex = /[!@#$%^&*()_\+\-=\[\]{}|;:'",.<>?/]/;
+    const upperRegex = /[A-Z]/;
+
+    // ----- Auth UI -----
+    let mode = "login"; // or "register"
+    const authView = document.getElementById("authView");
+    const chatView = document.getElementById("chatView");
     const form = document.getElementById("authForm");
     const toggle = document.getElementById("toggleMode");
     const status = document.getElementById("status");
     const submitBtn = document.getElementById("submitBtn");
+    const registerHint = document.getElementById("registerHint");
 
+    // ----- Chat UI -----
+    const whoami = document.getElementById("whoami");
+    const wsState = document.getElementById("wsState");
+    const log = document.getElementById("log");
+    const msg = document.getElementById("msg");
+    const sendBtn = document.getElementById("sendBtn");
+    const chatStatus = document.getElementById("chatStatus");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const reconnectBtn = document.getElementById("reconnectBtn");
+
+    let ws = null;
+
+    function setView(view) {
+      authView.style.display = view === "auth" ? "block" : "none";
+      chatView.style.display = view === "chat" ? "block" : "none";
+    }
+
+    function appendLog(line) {
+      log.textContent += line + "\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setStatus(text) {
+      status.textContent = text || "";
+    }
+
+    function validatePasswordClient(pwd) {
+      if (pwd.length < 12 || pwd.length > 15) return false;
+      if (!upperRegex.test(pwd)) return false;
+      if (!specialRegex.test(pwd)) return false;
+      return true;
+    }
+
+    function setReconnectEnabled(enabled) {
+      reconnectBtn.disabled = !enabled;
+    }
+
+    function connectWS() {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        chatStatus.textContent = "No token found. Please login again.";
+        setReconnectEnabled(false);
+        return;
+      }
+
+      // Close any existing socket cleanly
+      try {
+        if (ws && (ws.readyState === 0 || ws.readyState === 1)) ws.close();
+      } catch {}
+
+      const url = `${WS}?token=${encodeURIComponent(token)}`;
+      ws = new WebSocket(url);
+
+      wsState.textContent = "WS: CONNECTING";
+      chatStatus.textContent = "";
+      setReconnectEnabled(false);
+
+      ws.onopen = () => {
+        wsState.textContent = "WS: CONNECTED";
+        chatStatus.textContent = "";
+        appendLog("[SYSTEM] Connected.");
+        setReconnectEnabled(false);
+      };
+
+      ws.onmessage = (evt) => {
+        appendLog(evt.data);
+      };
+
+      ws.onclose = () => {
+        wsState.textContent = "WS: DISCONNECTED";
+        appendLog("[SYSTEM] Disconnected. Click RECONNECT.");
+        setReconnectEnabled(true);
+      };
+
+      ws.onerror = () => {
+        chatStatus.textContent = "WebSocket error. Check backend /ws endpoint.";
+        setReconnectEnabled(true);
+      };
+    }
+
+    function enterChat(usernameValue) {
+      whoami.textContent = `USER: ${usernameValue}`;
+      setView("chat");
+      log.textContent = "";
+      appendLog("[SYSTEM] Entering channel...");
+      setReconnectEnabled(true);
+      connectWS();
+    }
+
+    // Toggle login/register
     toggle.onclick = () => {
       mode = mode === "login" ? "register" : "login";
       submitBtn.textContent = mode === "login" ? "LOGIN" : "CREATE ACCOUNT";
       toggle.textContent = mode === "login" ? "CREATE ACCOUNT" : "BACK TO LOGIN";
-      status.textContent = "";
+      registerHint.style.display = mode === "register" ? "block" : "none";
+      setStatus("");
     };
 
+    // Submit login/register
     form.onsubmit = async (e) => {
       e.preventDefault();
-      status.textContent = "PROCESSING...";
+      setStatus("PROCESSING...");
+
+      const u = username.value.trim();
+      const p = password.value;
+
+      if (!u) {
+        setStatus("USERNAME REQUIRED.");
+        return;
+      }
+
+      // Client-side policy check (UX). Backend is authoritative.
+      if (mode === "register" && !validatePasswordClient(p)) {
+        setStatus(
+          "Password policy error:\n" +
+          "- 12–15 characters\n" +
+          "- 1 capital letter (A–Z)\n" +
+          "- 1 special character from:\n" +
+          `  ${ALLOWED_SPECIALS}`
+        );
+        return;
+      }
 
       const data = new URLSearchParams();
-      data.append("username", username.value);
-      data.append("password", password.value);
+      data.append("username", u);
+      data.append("password", p);
 
       try {
-        const res = await fetch(`http://127.0.0.1:8000/${mode}`, {
+        const res = await fetch(`${API}/${mode}`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: data
         });
 
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          status.textContent = result.detail || "ERROR";
+          setStatus(result.detail || result.msg || "ERROR");
           return;
         }
 
         if (mode === "login") {
           localStorage.setItem("token", result.access_token);
-          status.textContent = "ACCESS GRANTED";
+          localStorage.setItem("username", u);
+          setStatus("ACCESS GRANTED");
+          setTimeout(() => enterChat(u), 250);
         } else {
-          status.textContent = "ACCOUNT CREATED";
+          setStatus("ACCOUNT CREATED. LOGIN NOW.");
         }
       } catch {
-        status.textContent = "CONNECTION FAILED";
+        setStatus("CONNECTION FAILED. IS BACKEND RUNNING?");
       }
     };
+
+    // Send message
+    sendBtn.onclick = () => {
+      const text = msg.value.trim();
+      if (!text) return;
+
+      if (!ws || ws.readyState !== 1) {
+        chatStatus.textContent = "WS not connected.";
+        return;
+      }
+
+      ws.send(text);
+      msg.value = "";
+    };
+
+    msg.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendBtn.click();
+    });
+
+    // Reconnect button
+    reconnectBtn.onclick = () => {
+      appendLog("[SYSTEM] Reconnect requested...");
+      connectWS();
+    };
+
+    // Logout
+    logoutBtn.onclick = () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      if (ws) ws.close();
+      ws = null;
+      setStatus("");
+      chatStatus.textContent = "";
+      setView("auth");
+    };
+
+    // Auto-enter chat if token exists
+    (function autoResume() {
+      const token = localStorage.getItem("token");
+      const u = localStorage.getItem("username");
+      if (token && u) {
+        enterChat(u);
+      }
+    })();
   </script>
 </body>
 </html>
